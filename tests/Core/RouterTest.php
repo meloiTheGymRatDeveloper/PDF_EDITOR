@@ -57,4 +57,10 @@ class RouterTest extends TestCase
         $match = $this->router->match('GET', '/payment/success?token=abc123');
         $this->assertNotNull($match);
     }
+
+    public function test_throws_on_invalid_handler_format(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->router->get('/', ['OnlyOneElement']);
+    }
 }

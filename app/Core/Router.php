@@ -7,11 +7,17 @@ class Router
 
     public function get(string $path, array $handler): void
     {
+        if (count($handler) !== 2 || !is_string($handler[0]) || !is_string($handler[1])) {
+            throw new \InvalidArgumentException('Handler must be [ClassName, methodName]');
+        }
         $this->routes[] = ['method' => 'GET', 'path' => $path, 'handler' => $handler];
     }
 
     public function post(string $path, array $handler): void
     {
+        if (count($handler) !== 2 || !is_string($handler[0]) || !is_string($handler[1])) {
+            throw new \InvalidArgumentException('Handler must be [ClassName, methodName]');
+        }
         $this->routes[] = ['method' => 'POST', 'path' => $path, 'handler' => $handler];
     }
 
@@ -51,7 +57,19 @@ class Router
         }
 
         [$class, $method_name] = $match['handler'];
-        $controller = new $class();
-        $controller->$method_name(...array_values($match['params']));
+
+        if (!class_exists($class) || !method_exists($class, $method_name)) {
+            http_response_code(500);
+            echo '<h1>500 — Internal Server Error</h1>';
+            return;
+        }
+
+        try {
+            $controller = new $class();
+            $controller->$method_name(...array_values($match['params']));
+        } catch (\Throwable $e) {
+            http_response_code(500);
+            echo '<h1>500 — Internal Server Error</h1>';
+        }
     }
 }
