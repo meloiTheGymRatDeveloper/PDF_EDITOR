@@ -1,0 +1,16 @@
+{
+  "functions": {
+    "public/index.php": { "runtime": "vercel-php@0.7.2" },
+    "api/webhook.php":  { "runtime": "vercel-php@0.7.2" },
+    "api/cleanup.php":  { "runtime": "vercel-php@0.7.2" }
+  },
+  "crons": [
+    { "path": "/api/cleanup", "schedule": "0 3 * * *" }
+  ],
+  "routes": [
+    { "src": "/api/webhook", "dest": "/api/webhook.php" },
+    { "src": "/api/cleanup", "dest": "/api/cleanup.php" },
+    { "src": "/public/(.*)", "dest": "/public/$1" },
+    { "src": "/(.*)",        "dest": "/public/index.php" }
+  ]
+}

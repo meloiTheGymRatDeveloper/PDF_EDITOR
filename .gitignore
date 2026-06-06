@@ -1,0 +1,6 @@
+/vendor/
+/.env
+/node_modules/
+/.vercel/
+*.log
+.DS_Store
