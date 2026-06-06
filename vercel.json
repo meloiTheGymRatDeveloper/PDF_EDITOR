@@ -8,10 +8,10 @@
     { "path": "/api/cleanup", "schedule": "0 3 * * *" }
   ],
   "routes": [
-    { "src": "/api/webhook", "dest": "/api/webhook.php" },
-    { "src": "/api/cleanup", "dest": "/api/cleanup.php" },
-    { "src": "/css/(.*)",    "dest": "/public/css/$1" },
-    { "src": "/js/(.*)",     "dest": "/public/js/$1" },
-    { "src": "/(.*)",        "dest": "/api/index.php" }
+    { "src": "/api/webhook",  "dest": "/api/webhook.php" },
+    { "src": "/api/cleanup",  "dest": "/api/cleanup.php" },
+    { "src": "/css/(.*)",     "dest": "/css/$1" },
+    { "src": "/js/(.*)",      "dest": "/js/$1" },
+    { "src": "/(.*)",         "dest": "/api/index.php" }
   ]
 }
