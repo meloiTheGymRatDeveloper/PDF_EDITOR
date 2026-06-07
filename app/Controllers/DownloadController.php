@@ -42,7 +42,12 @@ class DownloadController extends Controller
         }
 
         if (!$this->isPaid($meta)) {
-            $this->abort(403);
+            $this->render('payment/failed', [
+                'title'   => 'Payment Not Confirmed Yet',
+                'token'   => htmlspecialchars($token),
+                'message' => 'Payment not confirmed yet. Please wait a moment and click Download again.',
+            ]);
+            return;
         }
 
         $ext      = $meta['ext'] ?? 'pdf';

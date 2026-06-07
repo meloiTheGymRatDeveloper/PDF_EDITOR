@@ -49,17 +49,8 @@ class PaymentController extends Controller
         $token     = $_GET['token'] ?? '';
         $fileModel = FileModel::fromEnv();
         $meta      = $fileModel->getMeta($token);
+        $remaining = $meta ? max(0, ($meta['expires_at'] ?? 0) - time()) : 3600;
 
-        if (!$meta || $meta['status'] !== 'paid') {
-            $this->render('payment/failed', [
-                'title'   => 'Payment Not Confirmed',
-                'token'   => $token,
-                'message' => 'Payment not yet confirmed. Please wait a moment and refresh.',
-            ]);
-            return;
-        }
-
-        $remaining = max(0, $meta['expires_at'] - time());
         $this->render('payment/success', [
             'title'     => 'Payment Successful — PDF_EDITOR',
             'token'     => htmlspecialchars($token),
