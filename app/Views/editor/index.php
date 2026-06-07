@@ -53,6 +53,19 @@
       <span class="tool-btn__icon">📎</span> Insert PDF
     </button>
     <input type="file" id="pm-insert-input" accept=".pdf" hidden>
+    <hr class="sidebar-divider">
+    <div id="pm-crop-section" style="display:none;">
+      <div class="sidebar-label">Crop (pt margins)</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">
+        <div><div class="field-label">Top</div><input type="number" id="pm-crop-top"    class="field" value="0" min="0"></div>
+        <div><div class="field-label">Right</div><input type="number" id="pm-crop-right"  class="field" value="0" min="0"></div>
+        <div><div class="field-label">Bottom</div><input type="number" id="pm-crop-bottom" class="field" value="0" min="0"></div>
+        <div><div class="field-label">Left</div><input type="number" id="pm-crop-left"   class="field" value="0" min="0"></div>
+      </div>
+      <button class="tool-btn" style="margin-top:6px;width:100%;" onclick="PageManagerTool.applyCrop()">
+        <span class="tool-btn__icon">✂️</span> Apply Crop
+      </button>
+    </div>
 
     <?php elseif ($tool === 'watermark'): ?>
     <div class="sidebar-label">Watermark</div>

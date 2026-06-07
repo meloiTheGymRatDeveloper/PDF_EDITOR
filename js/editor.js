@@ -470,6 +470,214 @@ const AddTextTool = (() => {
   return { onPageRender, toggleStyle, undo, clearAll, getProcessedBytes };
 })();
 
+// ── Page Manager Tool ───────────────────────────────────────────
+const PageManagerTool = (() => {
+  let pages      = [];
+  let extraDocs  = [];
+  let cropBoxes  = {};
+  let selectedIdx = null;
+
+  async function onFileLoad() {
+    const { totalPages } = Editor.getState();
+    pages     = Array.from({ length: totalPages }, (_, i) => ({
+      srcIdx: i, rotation: 0, deleted: false, isBlank: false, extraDocRef: null,
+    }));
+    extraDocs  = [];
+    cropBoxes  = {};
+    selectedIdx = null;
+    await renderGrid();
+    initSortable();
+  }
+
+  async function renderGrid() {
+    const { pdfjsDoc } = Editor.getState();
+    const grid = document.getElementById('page-manager-grid');
+    grid.innerHTML = '';
+
+    for (let i = 0; i < pages.length; i++) {
+      const p = pages[i];
+      const item = document.createElement('div');
+      item.className = 'pm-item' + (p.deleted ? ' pm-item--deleted' : '');
+      item.dataset.idx = i;
+      if (i === selectedIdx) item.style.outline = '2px solid #a78bfa';
+      item.onclick = () => selectPage(i);
+
+      const wrap = document.createElement('div');
+      wrap.className = 'pm-thumb-wrap';
+      const canvas = document.createElement('canvas');
+      canvas.className = 'pm-thumb';
+      wrap.appendChild(canvas);
+      item.appendChild(wrap);
+
+      (async () => {
+        try {
+          if (p.isBlank) {
+            canvas.width  = 100;
+            canvas.height = 130;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(0, 0, 100, 130);
+            return;
+          }
+          let srcDoc  = pdfjsDoc;
+          let srcPage = (p.srcIdx ?? 0) + 1;
+          if (p.extraDocRef !== null) {
+            srcDoc  = extraDocs[p.extraDocRef].pdfjsDoc;
+            srcPage = p.srcIdx + 1;
+          }
+          const page = await srcDoc.getPage(srcPage);
+          const vp   = page.getViewport({ scale: 0.3, rotation: p.rotation });
+          canvas.width  = vp.width;
+          canvas.height = vp.height;
+          await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+        } catch (_) { /* leave blank on error */ }
+      })();
+
+      const label = document.createElement('div');
+      label.className = 'pm-label';
+      label.textContent = `Page ${i + 1}`;
+      item.appendChild(label);
+
+      const actions = document.createElement('div');
+      actions.className = 'pm-actions';
+      const rotBtn = document.createElement('button');
+      rotBtn.textContent = '↻';
+      rotBtn.title = 'Rotate 90°';
+      rotBtn.onclick = e => { e.stopPropagation(); rotatePage(i); };
+      const delBtn = document.createElement('button');
+      delBtn.textContent = p.deleted ? '↩' : '✕';
+      delBtn.className   = p.deleted ? 'pm-btn--restore' : 'pm-btn--delete';
+      delBtn.title       = p.deleted ? 'Restore' : 'Delete';
+      delBtn.onclick     = e => { e.stopPropagation(); toggleDelete(i); };
+      actions.appendChild(rotBtn);
+      actions.appendChild(delBtn);
+      item.appendChild(actions);
+
+      grid.appendChild(item);
+    }
+
+    const addBtn = document.createElement('div');
+    addBtn.className = 'pm-add';
+    addBtn.innerHTML = '<div class="pm-add__icon">+</div><div class="pm-add__label">Blank page</div>';
+    addBtn.onclick = () => addBlankPage();
+    grid.appendChild(addBtn);
+  }
+
+  function initSortable() {
+    const grid = document.getElementById('page-manager-grid');
+    if (window.Sortable) {
+      Sortable.create(grid, {
+        animation: 150,
+        filter: '.pm-add',
+        onEnd: evt => {
+          if (evt.oldIndex === evt.newIndex) return;
+          const moved = pages.splice(evt.oldIndex, 1)[0];
+          pages.splice(evt.newIndex, 0, moved);
+          renderGrid();
+        },
+      });
+    }
+  }
+
+  function rotatePage(i) {
+    pages[i].rotation = (pages[i].rotation + 90) % 360;
+    renderGrid();
+  }
+
+  function toggleDelete(i) {
+    const activeCnt = pages.filter(p => !p.deleted).length;
+    if (!pages[i].deleted && activeCnt <= 1) {
+      showToast('A PDF must have at least 1 page');
+      return;
+    }
+    pages[i].deleted = !pages[i].deleted;
+    renderGrid();
+  }
+
+  function addBlankPage() {
+    pages.push({ srcIdx: null, rotation: 0, deleted: false, isBlank: true, extraDocRef: null });
+    renderGrid();
+  }
+
+  function selectPage(i) {
+    selectedIdx = (selectedIdx === i) ? null : i;
+    renderGrid();
+    const cropSection = document.getElementById('pm-crop-section');
+    if (!cropSection) return;
+    if (selectedIdx === null) {
+      cropSection.style.display = 'none';
+      return;
+    }
+    cropSection.style.display = '';
+    const c = cropBoxes[selectedIdx] || { left: 0, top: 0, right: 0, bottom: 0 };
+    ['left', 'top', 'right', 'bottom'].forEach(side =>
+      (document.getElementById(`pm-crop-${side}`).value = c[side]));
+  }
+
+  function applyCrop() {
+    if (selectedIdx === null) return;
+    cropBoxes[selectedIdx] = {
+      left:   parseInt(document.getElementById('pm-crop-left').value,   10) || 0,
+      top:    parseInt(document.getElementById('pm-crop-top').value,    10) || 0,
+      right:  parseInt(document.getElementById('pm-crop-right').value,  10) || 0,
+      bottom: parseInt(document.getElementById('pm-crop-bottom').value, 10) || 0,
+    };
+    showToast(`Crop applied to page ${selectedIdx + 1}`);
+  }
+
+  document.getElementById('pm-insert-input')?.addEventListener('change', async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!Editor.guardSize(file)) return;
+    const bytes     = await file.arrayBuffer();
+    const uint8     = new Uint8Array(bytes);
+    const pdfjsDoc2  = await pdfjsLib.getDocument({ data: uint8.slice() }).promise;
+    const pdfLibDoc2 = await PDFLib.PDFDocument.load(uint8);
+    const extraIdx  = extraDocs.length;
+    extraDocs.push({ bytes, pdfjsDoc: pdfjsDoc2, pdfLibDoc: pdfLibDoc2 });
+    for (let i = 0; i < pdfjsDoc2.numPages; i++) {
+      pages.push({ srcIdx: i, rotation: 0, deleted: false, isBlank: false, extraDocRef: extraIdx });
+    }
+    renderGrid();
+    e.target.value = '';
+  });
+
+  async function getProcessedBytes() {
+    const { pdfLibDoc } = Editor.getState();
+    const newDoc = await PDFLib.PDFDocument.create();
+    const active = pages.filter(p => !p.deleted);
+
+    let ao = 0;
+    for (const p of active) {
+      if (p.isBlank) {
+        newDoc.addPage([595, 842]);
+        ao++;
+        continue;
+      }
+      let added;
+      if (p.extraDocRef !== null) {
+        const srcDoc = extraDocs[p.extraDocRef].pdfLibDoc;
+        const [copied] = await newDoc.copyPages(srcDoc, [p.srcIdx]);
+        added = newDoc.addPage(copied);
+      } else {
+        const [copied] = await newDoc.copyPages(pdfLibDoc, [p.srcIdx]);
+        added = newDoc.addPage(copied);
+      }
+      if (p.rotation) added.setRotation(PDFLib.degrees(p.rotation));
+      if (cropBoxes[ao]) {
+        const c = cropBoxes[ao];
+        const { width, height } = added.getSize();
+        added.setCropBox(c.left, c.bottom, width - c.left - c.right, height - c.top - c.bottom);
+      }
+      ao++;
+    }
+
+    return await newDoc.save();
+  }
+
+  return { onFileLoad, rotatePage, toggleDelete, addBlankPage, selectPage, applyCrop, getProcessedBytes };
+})();
+
 // ── Merge Tool ──────────────────────────────────────────────────
 const MergeTool = (() => {
   const files = [];
@@ -697,13 +905,14 @@ async function initiatePayment() {
   try {
     const tool = window.CURRENT_TOOL;
     const toolMap = {
-      annotate:       AnnotateTool,
-      merge:          MergeTool,
-      split:          SplitTool,
-      compress:       CompressTool,
-      convert:        ConvertTool,
-      sign:           SignTool,
-      'add-text':     AddTextTool,
+      annotate:        AnnotateTool,
+      merge:           MergeTool,
+      split:           SplitTool,
+      compress:        CompressTool,
+      convert:         ConvertTool,
+      sign:            SignTool,
+      'add-text':      AddTextTool,
+      'page-manager':  PageManagerTool,
     };
 
     const bytes    = await toolMap[tool].getProcessedBytes();
