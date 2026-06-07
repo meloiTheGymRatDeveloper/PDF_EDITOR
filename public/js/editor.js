@@ -31,14 +31,32 @@ const Editor = (() => {
     try {
       rawBytes = await file.arrayBuffer();
       const uint8 = new Uint8Array(rawBytes);
-      pdfjsDoc  = await pdfjsLib.getDocument({ data: uint8.slice() }).promise;
-      pdfLibDoc = await PDFLib.PDFDocument.load(uint8);
+      pdfjsDoc = await pdfjsLib.getDocument({ data: uint8.slice() }).promise;
+      try {
+        pdfLibDoc = await PDFLib.PDFDocument.load(uint8);
+      } catch (_encErr) {
+        showToast('This PDF is password-protected. Remove the password first.');
+        rawBytes = null;
+        pdfjsDoc = null;
+        pdfLibDoc = null;
+        return;
+      }
       totalPages = pdfjsDoc.numPages;
-      pageNum = 1;
+      pageNum    = 1;
 
       document.getElementById('upload-zone').style.display = 'none';
-      document.getElementById('pdf-container').style.display = 'block';
       document.getElementById('btn-pay').disabled = false;
+      if (window.CURRENT_TOOL === 'protect') {
+        document.getElementById('btn-pay').disabled = true;
+      }
+
+      if (window.CURRENT_TOOL === 'page-manager') {
+        document.getElementById('page-manager-grid').style.display = 'block';
+        await PageManagerTool.onFileLoad();
+        return;
+      }
+
+      document.getElementById('pdf-container').style.display = 'block';
 
       if (window.CURRENT_TOOL === 'compress') {
         document.getElementById('compress-info').textContent =
@@ -68,6 +86,8 @@ const Editor = (() => {
 
     if (window.CURRENT_TOOL === 'annotate') {
       AnnotateTool.onPageRender(n);
+    } else if (window.CURRENT_TOOL === 'add-text') {
+      AddTextTool.onPageRender(n);
     }
   }
 
@@ -118,10 +138,19 @@ const AnnotateTool = (() => {
   function setMode(m) {
     mode = m;
     document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
-    const map = { text: 'btn-text', highlight: 'btn-highlight', draw: 'btn-draw', rect: 'btn-rect', image: 'btn-image' };
+    const map = {
+      text:          'btn-text',
+      highlight:     'btn-highlight',
+      draw:          'btn-draw',
+      rect:          'btn-rect',
+      image:         'btn-image',
+      underline:     'btn-underline',
+      strikethrough: 'btn-strikethrough',
+      sticky:        'btn-sticky',
+    };
     document.getElementById(map[m])?.classList.add('active');
     const overlay = document.getElementById('overlay-canvas');
-    overlay.style.cursor = (m === 'text' || m === 'image') ? 'crosshair' : 'crosshair';
+    overlay.style.cursor = 'crosshair';
   }
 
   function onPageRender(n) {
@@ -151,6 +180,15 @@ const AnnotateTool = (() => {
         pendingImgPlacement = { x: startX, y: startY };
         imgInput.click();
       }
+      if (mode === 'sticky') {
+        drawing = false;
+        const text = prompt('Sticky note text:');
+        if (!text) return;
+        const action = { type: 'sticky', x: startX, y: startY, text };
+        (history[n] = history[n] || []).push(action);
+        drawAction(canvas.getContext('2d'), action);
+        return;
+      }
       if (mode === 'draw') tempPath = [{ x: startX, y: startY }];
     };
     canvas.onmousemove = e => {
@@ -170,7 +208,7 @@ const AnnotateTool = (() => {
         ctx.lineTo(cx, cy);
         ctx.stroke();
       }
-      if (mode === 'highlight' || mode === 'rect') {
+      if (mode === 'highlight' || mode === 'rect' || mode === 'underline' || mode === 'strikethrough') {
         const actions = (history[n] || []);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         actions.forEach(a => drawAction(ctx, a));
@@ -185,7 +223,7 @@ const AnnotateTool = (() => {
       const cy = e.clientY - r.top;
       if (mode === 'draw') {
         (history[n] = history[n] || []).push({ type: 'draw', path: [...tempPath] });
-      } else if (mode === 'highlight' || mode === 'rect') {
+      } else if (mode === 'highlight' || mode === 'rect' || mode === 'underline' || mode === 'strikethrough') {
         (history[n] = history[n] || []).push({ type: mode, x: startX, y: startY, w: cx - startX, h: cy - startY });
       }
       onPageRender(n);
@@ -232,6 +270,30 @@ const AnnotateTool = (() => {
       const img = new Image(); img.src = a.src;
       img.onload = () => ctx.drawImage(img, a.x, a.y, a.w, a.h);
       if (img.complete) ctx.drawImage(img, a.x, a.y, a.w, a.h);
+    } else if (a.type === 'underline') {
+      ctx.strokeStyle = '#0000ff';
+      ctx.lineWidth   = 2;
+      ctx.beginPath();
+      ctx.moveTo(a.x,           a.y + Math.abs(a.h));
+      ctx.lineTo(a.x + a.w,     a.y + Math.abs(a.h));
+      ctx.stroke();
+    } else if (a.type === 'strikethrough') {
+      ctx.strokeStyle = '#ff0000';
+      ctx.lineWidth   = 2;
+      ctx.beginPath();
+      ctx.moveTo(a.x,           a.y + Math.abs(a.h) / 2);
+      ctx.lineTo(a.x + a.w,     a.y + Math.abs(a.h) / 2);
+      ctx.stroke();
+    } else if (a.type === 'sticky') {
+      ctx.fillStyle = 'rgba(255,230,0,0.88)';
+      ctx.fillRect(a.x, a.y, 120, 60);
+      ctx.strokeStyle = '#c8a400';
+      ctx.lineWidth   = 1;
+      ctx.strokeRect(a.x, a.y, 120, 60);
+      ctx.fillStyle = '#333';
+      ctx.font      = '11px sans-serif';
+      a.text.split('\n').slice(0, 3).forEach((l, i) =>
+        ctx.fillText(l.slice(0, 20), a.x + 4, a.y + 16 + i * 14));
     }
   }
 
@@ -293,6 +355,41 @@ const AnnotateTool = (() => {
             x: a.x * scaleX, y: height - (a.y + a.h) * scaleY,
             width: a.w * scaleX, height: a.h * scaleY,
           });
+        } else if (a.type === 'underline') {
+          page.drawLine({
+            start:     { x: a.x * scaleX,         y: height - (a.y + Math.abs(a.h)) * scaleY },
+            end:       { x: (a.x + a.w) * scaleX,  y: height - (a.y + Math.abs(a.h)) * scaleY },
+            thickness: 2,
+            color:     PDFLib.rgb(0, 0, 1),
+          });
+        } else if (a.type === 'strikethrough') {
+          page.drawLine({
+            start:     { x: a.x * scaleX,         y: height - (a.y + Math.abs(a.h) / 2) * scaleY },
+            end:       { x: (a.x + a.w) * scaleX,  y: height - (a.y + Math.abs(a.h) / 2) * scaleY },
+            thickness: 2,
+            color:     PDFLib.rgb(1, 0, 0),
+          });
+        } else if (a.type === 'sticky') {
+          const noteH = 60 * scaleY;
+          const noteW = 120 * scaleX;
+          page.drawRectangle({
+            x:       a.x * scaleX,
+            y:       height - (a.y + 60) * scaleY,
+            width:   noteW,
+            height:  noteH,
+            color:   PDFLib.rgb(1, 0.9, 0),
+            opacity: 0.88,
+          });
+          const noteFont = await pdfLibDoc.embedFont(PDFLib.StandardFonts.Helvetica);
+          a.text.split('\n').slice(0, 3).forEach((l, i) => {
+            page.drawText(l.slice(0, 20), {
+              x:     a.x * scaleX + 4 * scaleX,
+              y:     height - (a.y + 16 + i * 14) * scaleY,
+              size:  8,
+              font:  noteFont,
+              color: PDFLib.rgb(0.2, 0.2, 0.2),
+            });
+          });
         }
       }
     }
@@ -300,6 +397,366 @@ const AnnotateTool = (() => {
   }
 
   return { setMode, onPageRender, undo, clear, getProcessedBytes };
+})();
+
+// ── Add Text Tool ───────────────────────────────────────────────
+const AddTextTool = (() => {
+  let boxes = {}; // {pageNum: [{x,y,text,fontFamily,fontSize,bold,italic,color,_dw}]}
+
+  const FONT_MAP = {
+    Arial:   { n: PDFLib.StandardFonts.Helvetica,    b: PDFLib.StandardFonts.HelveticaBold,       i: PDFLib.StandardFonts.HelveticaOblique,    bi: PDFLib.StandardFonts.HelveticaBoldOblique },
+    Times:   { n: PDFLib.StandardFonts.TimesRoman,   b: PDFLib.StandardFonts.TimesBold,           i: PDFLib.StandardFonts.TimesItalic,         bi: PDFLib.StandardFonts.TimesBoldItalic },
+    Courier: { n: PDFLib.StandardFonts.Courier,      b: PDFLib.StandardFonts.CourierBold,         i: PDFLib.StandardFonts.CourierOblique,      bi: PDFLib.StandardFonts.CourierBoldOblique },
+  };
+
+  function getFontName(family, bold, italic) {
+    const v = FONT_MAP[family] || FONT_MAP.Arial;
+    return (bold && italic) ? v.bi : bold ? v.b : italic ? v.i : v.n;
+  }
+
+  function getSettings() {
+    return {
+      fontFamily: document.getElementById('at-font-family').value,
+      fontSize:   parseInt(document.getElementById('at-font-size').value, 10) || 14,
+      color:      document.getElementById('at-color').value,
+      bold:       document.getElementById('at-bold').classList.contains('active'),
+      italic:     document.getElementById('at-italic').classList.contains('active'),
+    };
+  }
+
+  function toggleStyle(btnId) {
+    document.getElementById(btnId).classList.toggle('active');
+  }
+
+  function onPageRender(n) {
+    const overlay = document.getElementById('overlay-canvas');
+    const ctx = overlay.getContext('2d');
+    ctx.clearRect(0, 0, overlay.width, overlay.height);
+    (boxes[n] || []).forEach(b => drawBox(ctx, b));
+    overlay.onclick = e => handleClick(e, overlay, n);
+  }
+
+  function drawBox(ctx, b) {
+    const style = `${b.italic ? 'italic ' : ''}${b.bold ? 'bold ' : ''}${b.fontSize}px sans-serif`;
+    ctx.font = style;
+    ctx.fillStyle = b.color;
+    ctx.fillText(b.text, b.x, b.y);
+    b._dw = ctx.measureText(b.text).width;
+    ctx.strokeStyle = 'rgba(100,100,255,0.35)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.strokeRect(b.x - 2, b.y - b.fontSize - 2, b._dw + 18, b.fontSize + 6);
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(255,80,80,0.85)';
+    ctx.fillRect(b.x + b._dw, b.y - b.fontSize - 2, 14, 14);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 10px sans-serif';
+    ctx.fillText('×', b.x + b._dw + 3, b.y - b.fontSize + 8);
+  }
+
+  function handleClick(e, canvas, n) {
+    const r  = canvas.getBoundingClientRect();
+    const cx = e.clientX - r.left;
+    const cy = e.clientY - r.top;
+    const list = boxes[n] || [];
+    for (let i = list.length - 1; i >= 0; i--) {
+      const b = list[i];
+      if (b._dw !== undefined &&
+          cx >= b.x + b._dw && cx <= b.x + b._dw + 14 &&
+          cy >= b.y - b.fontSize - 2 && cy <= b.y - b.fontSize + 12) {
+        list.splice(i, 1);
+        onPageRender(n);
+        return;
+      }
+    }
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.style.cssText = [
+      'position:fixed',
+      `left:${e.clientX}px`,
+      `top:${e.clientY}px`,
+      'z-index:9999',
+      'background:#fff',
+      'color:#000',
+      'border:2px solid #667eea',
+      'border-radius:4px',
+      'padding:3px 8px',
+      'font-size:14px',
+      'min-width:120px',
+      'outline:none',
+      'box-shadow:0 4px 12px rgba(0,0,0,0.3)',
+    ].join(';');
+    document.body.appendChild(input);
+    input.focus();
+    let committed = false;
+    const commit = () => {
+      if (committed) return;
+      committed = true;
+      input.remove();
+      if (!input.value.trim()) return;
+      (boxes[n] = boxes[n] || []).push({ x: cx, y: cy, text: input.value.trim(), ...getSettings() });
+      onPageRender(n);
+    };
+    input.onblur = commit;
+    input.onkeydown = ev => {
+      if (ev.key === 'Enter')  commit();
+      if (ev.key === 'Escape') { committed = true; input.remove(); }
+    };
+  }
+
+  function undo() {
+    const { pageNum } = Editor.getState();
+    (boxes[pageNum] = boxes[pageNum] || []).pop();
+    onPageRender(pageNum);
+  }
+
+  function clearAll() {
+    const { pageNum } = Editor.getState();
+    boxes[pageNum] = [];
+    onPageRender(pageNum);
+  }
+
+  async function getProcessedBytes() {
+    const { pdfLibDoc, totalPages } = Editor.getState();
+    const pdfCanvas = document.getElementById('pdf-canvas');
+    for (let n = 1; n <= totalPages; n++) {
+      const list = boxes[n] || [];
+      if (!list.length) continue;
+      const page = pdfLibDoc.getPage(n - 1);
+      const { width, height } = page.getSize();
+      const sx = width  / pdfCanvas.width;
+      const sy = height / pdfCanvas.height;
+      const fontCache = {};
+      for (const b of list) {
+        const fontName = getFontName(b.fontFamily, b.bold, b.italic);
+        if (!fontCache[fontName]) fontCache[fontName] = await pdfLibDoc.embedFont(fontName);
+        const font = fontCache[fontName];
+        const hex = b.color.replace('#', '');
+        const r  = parseInt(hex.slice(0, 2), 16) / 255;
+        const g  = parseInt(hex.slice(2, 4), 16) / 255;
+        const bv = parseInt(hex.slice(4, 6), 16) / 255;
+        page.drawText(b.text, {
+          x:     b.x * sx,
+          y:     height - b.y * sy,
+          size:  b.fontSize,
+          font,
+          color: PDFLib.rgb(r, g, bv),
+        });
+      }
+    }
+    return await pdfLibDoc.save();
+  }
+
+  return { onPageRender, toggleStyle, undo, clearAll, getProcessedBytes };
+})();
+
+// ── Page Manager Tool ───────────────────────────────────────────
+const PageManagerTool = (() => {
+  let pages      = [];
+  let extraDocs  = [];
+  let cropBoxes   = {};
+  let selectedIdx = null;
+  let sortableInst = null;
+
+  async function onFileLoad() {
+    const { totalPages } = Editor.getState();
+    pages     = Array.from({ length: totalPages }, (_, i) => ({
+      srcIdx: i, rotation: 0, deleted: false, isBlank: false, extraDocRef: null,
+    }));
+    extraDocs  = [];
+    cropBoxes  = {};
+    selectedIdx = null;
+    await renderGrid();
+  }
+
+  async function renderGrid() {
+    const { pdfjsDoc } = Editor.getState();
+    const grid = document.getElementById('page-manager-grid');
+    grid.innerHTML = '';
+
+    for (let i = 0; i < pages.length; i++) {
+      const p = pages[i];
+      const item = document.createElement('div');
+      item.className = 'pm-item' + (p.deleted ? ' pm-item--deleted' : '');
+      item.dataset.idx = i;
+      if (i === selectedIdx) item.style.outline = '2px solid #a78bfa';
+      item.onclick = () => selectPage(i);
+
+      const wrap = document.createElement('div');
+      wrap.className = 'pm-thumb-wrap';
+      const canvas = document.createElement('canvas');
+      canvas.className = 'pm-thumb';
+      wrap.appendChild(canvas);
+      item.appendChild(wrap);
+
+      (async () => {
+        try {
+          if (p.isBlank) {
+            canvas.width  = 100;
+            canvas.height = 130;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(0, 0, 100, 130);
+            return;
+          }
+          let srcDoc  = pdfjsDoc;
+          let srcPage = (p.srcIdx ?? 0) + 1;
+          if (p.extraDocRef !== null) {
+            srcDoc  = extraDocs[p.extraDocRef].pdfjsDoc;
+            srcPage = p.srcIdx + 1;
+          }
+          const page = await srcDoc.getPage(srcPage);
+          const vp   = page.getViewport({ scale: 0.3, rotation: p.rotation });
+          canvas.width  = vp.width;
+          canvas.height = vp.height;
+          await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+        } catch (_) { /* leave blank on error */ }
+      })();
+
+      const label = document.createElement('div');
+      label.className = 'pm-label';
+      label.textContent = `Page ${i + 1}`;
+      item.appendChild(label);
+
+      const actions = document.createElement('div');
+      actions.className = 'pm-actions';
+      const rotBtn = document.createElement('button');
+      rotBtn.textContent = '↻';
+      rotBtn.title = 'Rotate 90°';
+      rotBtn.onclick = e => { e.stopPropagation(); rotatePage(i); };
+      const delBtn = document.createElement('button');
+      delBtn.textContent = p.deleted ? '↩' : '✕';
+      delBtn.className   = p.deleted ? 'pm-btn--restore' : 'pm-btn--delete';
+      delBtn.title       = p.deleted ? 'Restore' : 'Delete';
+      delBtn.onclick     = e => { e.stopPropagation(); toggleDelete(i); };
+      actions.appendChild(rotBtn);
+      actions.appendChild(delBtn);
+      item.appendChild(actions);
+
+      grid.appendChild(item);
+    }
+
+    const addBtn = document.createElement('div');
+    addBtn.className = 'pm-add';
+    addBtn.innerHTML = '<div class="pm-add__icon">+</div><div class="pm-add__label">Blank page</div>';
+    addBtn.onclick = () => addBlankPage();
+    grid.appendChild(addBtn);
+    initSortable();
+  }
+
+  function initSortable() {
+    const grid = document.getElementById('page-manager-grid');
+    if (!window.Sortable) return;
+    if (sortableInst) { sortableInst.destroy(); sortableInst = null; }
+    sortableInst = Sortable.create(grid, {
+      animation: 150,
+      filter: '.pm-add',
+      onEnd: evt => {
+        if (evt.oldIndex === evt.newIndex) return;
+        const moved = pages.splice(evt.oldIndex, 1)[0];
+        pages.splice(evt.newIndex, 0, moved);
+        renderGrid();
+      },
+    });
+  }
+
+  function rotatePage(i) {
+    pages[i].rotation = (pages[i].rotation + 90) % 360;
+    renderGrid();
+  }
+
+  function toggleDelete(i) {
+    const activeCnt = pages.filter(p => !p.deleted).length;
+    if (!pages[i].deleted && activeCnt <= 1) {
+      showToast('A PDF must have at least 1 page');
+      return;
+    }
+    pages[i].deleted = !pages[i].deleted;
+    renderGrid();
+  }
+
+  function addBlankPage() {
+    pages.push({ srcIdx: null, rotation: 0, deleted: false, isBlank: true, extraDocRef: null });
+    renderGrid();
+  }
+
+  function selectPage(i) {
+    selectedIdx = (selectedIdx === i) ? null : i;
+    renderGrid();
+    const cropSection = document.getElementById('pm-crop-section');
+    if (!cropSection) return;
+    if (selectedIdx === null) {
+      cropSection.style.display = 'none';
+      return;
+    }
+    cropSection.style.display = '';
+    const c = cropBoxes[selectedIdx] || { left: 0, top: 0, right: 0, bottom: 0 };
+    ['left', 'top', 'right', 'bottom'].forEach(side =>
+      (document.getElementById(`pm-crop-${side}`).value = c[side]));
+  }
+
+  function applyCrop() {
+    if (selectedIdx === null) return;
+    cropBoxes[selectedIdx] = {
+      left:   parseInt(document.getElementById('pm-crop-left').value,   10) || 0,
+      top:    parseInt(document.getElementById('pm-crop-top').value,    10) || 0,
+      right:  parseInt(document.getElementById('pm-crop-right').value,  10) || 0,
+      bottom: parseInt(document.getElementById('pm-crop-bottom').value, 10) || 0,
+    };
+    showToast(`Crop applied to page ${selectedIdx + 1}`);
+  }
+
+  document.getElementById('pm-insert-input')?.addEventListener('change', async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!Editor.guardSize(file)) return;
+    const bytes     = await file.arrayBuffer();
+    const uint8     = new Uint8Array(bytes);
+    const pdfjsDoc2  = await pdfjsLib.getDocument({ data: uint8.slice() }).promise;
+    const pdfLibDoc2 = await PDFLib.PDFDocument.load(uint8);
+    const extraIdx  = extraDocs.length;
+    extraDocs.push({ bytes, pdfjsDoc: pdfjsDoc2, pdfLibDoc: pdfLibDoc2 });
+    for (let i = 0; i < pdfjsDoc2.numPages; i++) {
+      pages.push({ srcIdx: i, rotation: 0, deleted: false, isBlank: false, extraDocRef: extraIdx });
+    }
+    renderGrid();
+    e.target.value = '';
+  });
+
+  async function getProcessedBytes() {
+    const { pdfLibDoc } = Editor.getState();
+    const newDoc = await PDFLib.PDFDocument.create();
+    const active = pages.filter(p => !p.deleted);
+
+    let ao = 0;
+    for (const p of active) {
+      if (p.isBlank) {
+        newDoc.addPage([595, 842]);
+        ao++;
+        continue;
+      }
+      let added;
+      if (p.extraDocRef !== null) {
+        const srcDoc = extraDocs[p.extraDocRef].pdfLibDoc;
+        const [copied] = await newDoc.copyPages(srcDoc, [p.srcIdx]);
+        added = newDoc.addPage(copied);
+      } else {
+        const [copied] = await newDoc.copyPages(pdfLibDoc, [p.srcIdx]);
+        added = newDoc.addPage(copied);
+      }
+      if (p.rotation) added.setRotation(PDFLib.degrees(p.rotation));
+      if (cropBoxes[ao]) {
+        const c = cropBoxes[ao];
+        const { width, height } = added.getSize();
+        added.setCropBox(c.left, c.bottom, width - c.left - c.right, height - c.top - c.bottom);
+      }
+      ao++;
+    }
+
+    return await newDoc.save();
+  }
+
+  return { onFileLoad, rotatePage, toggleDelete, addBlankPage, selectPage, applyCrop, getProcessedBytes };
 })();
 
 // ── Merge Tool ──────────────────────────────────────────────────
@@ -520,6 +977,202 @@ const SignTool = (() => {
   return { clearSig, placeSig, detectFields, getProcessedBytes };
 })();
 
+// ── Watermark Tool ──────────────────────────────────────────────
+const WatermarkTool = (() => {
+  let imgBytes = null;
+  let imgMime  = 'image/png';
+
+  document.getElementById('wm-img-input')?.addEventListener('change', async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    imgMime  = file.type;
+    imgBytes = await file.arrayBuffer();
+    e.target.value = '';
+    showToast('Image loaded');
+  });
+
+  function setMode(m) {
+    document.getElementById('wm-mode-text').classList.toggle('active', m === 'text');
+    document.getElementById('wm-mode-image').classList.toggle('active', m === 'image');
+    document.getElementById('wm-text-options').style.display = m === 'text'  ? '' : 'none';
+    document.getElementById('wm-img-options').style.display  = m === 'image' ? '' : 'none';
+  }
+
+  function toggleRangeInput() {
+    const val = document.getElementById('wm-apply-to').value;
+    document.getElementById('wm-range').style.display = val === 'range' ? '' : 'none';
+  }
+
+  function getTargetIndices(totalPages) {
+    const val = document.getElementById('wm-apply-to').value;
+    if (val === 'all')     return Array.from({ length: totalPages }, (_, i) => i);
+    if (val === 'current') return [Editor.getState().pageNum - 1];
+    const raw = document.getElementById('wm-range').value;
+    const idxs = [];
+    raw.split(',').forEach(part => {
+      const m = part.trim().match(/^(\d+)(?:-(\d+))?$/);
+      if (!m) return;
+      const s = Math.max(1, parseInt(m[1], 10));
+      const e = Math.min(totalPages, parseInt(m[2] ?? m[1], 10));
+      for (let i = s; i <= e; i++) idxs.push(i - 1);
+    });
+    return idxs.length ? idxs : Array.from({ length: totalPages }, (_, i) => i);
+  }
+
+  function hexToRgb(hex) {
+    const h = hex.replace('#', '');
+    return [
+      parseInt(h.slice(0, 2), 16) / 255,
+      parseInt(h.slice(2, 4), 16) / 255,
+      parseInt(h.slice(4, 6), 16) / 255,
+    ];
+  }
+
+  async function getProcessedBytes() {
+    const { pdfLibDoc, totalPages } = Editor.getState();
+    const isText   = document.getElementById('wm-mode-text').classList.contains('active');
+    const opacity  = parseInt(document.getElementById('wm-opacity').value, 10) / 100;
+    const rotation = parseFloat(document.getElementById('wm-rotation').value) || -45;
+    const targets  = getTargetIndices(totalPages);
+
+    if (isText) {
+      const text = document.getElementById('wm-text').value.trim();
+      if (!text) throw new Error('Enter watermark text first');
+      const size = parseInt(document.getElementById('wm-text-size').value, 10) || 48;
+      const [r, g, b] = hexToRgb(document.getElementById('wm-text-color').value);
+      const font = await pdfLibDoc.embedFont(PDFLib.StandardFonts.HelveticaBold);
+      for (const idx of targets) {
+        const page = pdfLibDoc.getPage(idx);
+        const { width, height } = page.getSize();
+        const textWidth = font.widthOfTextAtSize(text, size);
+        page.drawText(text, {
+          x:      width  / 2 - textWidth / 2,
+          y:      height / 2 - size / 2,
+          size,
+          font,
+          color:  PDFLib.rgb(r, g, b),
+          opacity,
+          rotate: PDFLib.degrees(rotation),
+        });
+      }
+    } else {
+      if (!imgBytes) throw new Error('Select a watermark image first');
+      const isPng = imgMime === 'image/png';
+      const img   = isPng
+        ? await pdfLibDoc.embedPng(imgBytes)
+        : await pdfLibDoc.embedJpg(imgBytes);
+      const size = parseInt(document.getElementById('wm-img-size').value, 10) || 200;
+      for (const idx of targets) {
+        const page = pdfLibDoc.getPage(idx);
+        const { width, height } = page.getSize();
+        page.drawImage(img, {
+          x:       width  / 2 - size / 2,
+          y:       height / 2 - size / 2,
+          width:   size,
+          height:  size,
+          opacity,
+        });
+      }
+    }
+
+    return await pdfLibDoc.save();
+  }
+
+  return { setMode, toggleRangeInput, getProcessedBytes };
+})();
+
+// ── Header & Footer Tool ────────────────────────────────────────
+const HeaderFooterTool = (() => {
+  function getZone(id) {
+    return document.getElementById(`hf-${id}`)?.value.trim() || '';
+  }
+
+  function resolveTokens(text, pageNum, totalPages, startAt) {
+    return text
+      .replace(/\{page\}/g,  String(pageNum - 1 + startAt))
+      .replace(/\{total\}/g, String(totalPages));
+  }
+
+  async function getProcessedBytes() {
+    const { pdfLibDoc, totalPages } = Editor.getState();
+    const fontSize = parseInt(document.getElementById('hf-font-size').value, 10) || 10;
+    const startAt  = parseInt(document.getElementById('hf-start-at').value,  10) || 1;
+    const font     = await pdfLibDoc.embedFont(PDFLib.StandardFonts.Helvetica);
+    const margin   = 15;
+    const black    = PDFLib.rgb(0, 0, 0);
+
+    for (let n = 1; n <= totalPages; n++) {
+      const page = pdfLibDoc.getPage(n - 1);
+      const { width, height } = page.getSize();
+
+      const zones = [
+        { id: 'header-left',   baseX: margin,         y: height - margin - fontSize, align: 'left'   },
+        { id: 'header-center', baseX: width / 2,      y: height - margin - fontSize, align: 'center' },
+        { id: 'header-right',  baseX: width - margin, y: height - margin - fontSize, align: 'right'  },
+        { id: 'footer-left',   baseX: margin,         y: margin,                     align: 'left'   },
+        { id: 'footer-center', baseX: width / 2,      y: margin,                     align: 'center' },
+        { id: 'footer-right',  baseX: width - margin, y: margin,                     align: 'right'  },
+      ];
+
+      for (const z of zones) {
+        const raw = getZone(z.id);
+        if (!raw) continue;
+        const text      = resolveTokens(raw, n, totalPages, startAt);
+        const textWidth = font.widthOfTextAtSize(text, fontSize);
+        let x = z.baseX;
+        if (z.align === 'center') x -= textWidth / 2;
+        if (z.align === 'right')  x -= textWidth;
+        page.drawText(text, { x, y: z.y, size: fontSize, font, color: black });
+      }
+    }
+
+    return await pdfLibDoc.save();
+  }
+
+  return { getProcessedBytes };
+})();
+
+// ── Protect PDF Tool ────────────────────────────────────────────
+const ProtectTool = (() => {
+  function validate() {
+    const pw  = document.getElementById('pt-password')?.value || '';
+    const pw2 = document.getElementById('pt-confirm')?.value  || '';
+    const err = document.getElementById('pt-error');
+    if (!err) return true;
+    if (pw.length < 4) {
+      err.textContent = 'Password must be at least 4 characters';
+      return false;
+    }
+    if (pw !== pw2) {
+      err.textContent = 'Passwords do not match';
+      return false;
+    }
+    err.textContent = '';
+    return true;
+  }
+
+  function onInput() {
+    const { pdfLibDoc } = Editor.getState();
+    document.getElementById('btn-pay').disabled = !pdfLibDoc || !validate();
+  }
+  document.getElementById('pt-password')?.addEventListener('input', onInput);
+  document.getElementById('pt-confirm')?.addEventListener('input', onInput);
+
+  async function getProcessedBytes() {
+    if (!validate()) throw new Error('Fix password errors before downloading');
+    const { pdfLibDoc } = Editor.getState();
+    const userPassword  = document.getElementById('pt-password').value;
+    const ownerPassword = Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b => b.toString(16).padStart(2, '0')).join('');
+    const permissions   = {};
+    if (document.getElementById('pt-allow-print').checked) permissions.printing  = 'highResolution';
+    if (document.getElementById('pt-allow-copy').checked)  permissions.copying   = true;
+    if (document.getElementById('pt-allow-edit').checked)  permissions.modifying = true;
+    return await pdfLibDoc.save({ userPassword, ownerPassword, permissions });
+  }
+
+  return { validate, getProcessedBytes };
+})();
+
 // ── Payment Initiation ──────────────────────────────────────────
 async function initiatePayment() {
   const btn = document.getElementById('btn-pay');
@@ -529,12 +1182,17 @@ async function initiatePayment() {
   try {
     const tool = window.CURRENT_TOOL;
     const toolMap = {
-      annotate: AnnotateTool,
-      merge:    MergeTool,
-      split:    SplitTool,
-      compress: CompressTool,
-      convert:  ConvertTool,
-      sign:     SignTool,
+      annotate:         AnnotateTool,
+      merge:            MergeTool,
+      split:            SplitTool,
+      compress:         CompressTool,
+      convert:          ConvertTool,
+      sign:             SignTool,
+      'add-text':       AddTextTool,
+      'page-manager':   PageManagerTool,
+      'watermark':      WatermarkTool,
+      'header-footer':  HeaderFooterTool,
+      'protect':        ProtectTool,
     };
 
     const bytes    = await toolMap[tool].getProcessedBytes();
