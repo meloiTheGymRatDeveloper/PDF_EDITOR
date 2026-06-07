@@ -21,22 +21,38 @@ class FileModel
         );
     }
 
+    private function curlPut(string $url, string $body, array $headers): array
+    {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_CUSTOMREQUEST  => 'PUT',
+            CURLOPT_POSTFIELDS     => $body,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPHEADER     => $headers,
+        ]);
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        return [$response ?: '', $httpCode];
+    }
+
     public function upload(string $uuid, string $bytes, string $mimeType = 'application/pdf'): string
     {
         $ext      = ($mimeType === 'application/zip') ? 'zip' : 'pdf';
         $filename = "pending_{$uuid}.{$ext}";
 
-        $res = $this->http->put(self::BLOB_API . '/' . $filename, [
-            'headers' => [
-                'Authorization'    => "Bearer {$this->token}",
-                'x-api-version'    => '7',
-                'x-content-type'   => $mimeType,
-                'x-access'         => 'private',
-            ],
-            'body' => $bytes,
+        [$body, $code] = $this->curlPut(self::BLOB_API . '/' . $filename, $bytes, [
+            "Authorization: Bearer {$this->token}",
+            "Content-Type: {$mimeType}",
+            "x-content-type: {$mimeType}",
+            "x-access: private",
         ]);
 
-        $data    = json_decode((string) $res->getBody(), true);
+        if ($code >= 400) {
+            throw new \RuntimeException("Blob upload failed ({$code}): {$body}");
+        }
+
+        $data    = json_decode($body, true);
         $blobUrl = $data['url'];
 
         $meta = [
@@ -47,15 +63,16 @@ class FileModel
             'ext'        => $ext,
         ];
 
-        $this->http->put(self::BLOB_API . "/meta_{$uuid}.json", [
-            'headers' => [
-                'Authorization'  => "Bearer {$this->token}",
-                'x-api-version'  => '7',
-                'x-content-type' => 'application/json',
-                'x-access'       => 'private',
-            ],
-            'body' => json_encode($meta),
+        [$metaBody, $metaCode] = $this->curlPut(self::BLOB_API . "/meta_{$uuid}.json", json_encode($meta), [
+            "Authorization: Bearer {$this->token}",
+            "Content-Type: application/json",
+            "x-content-type: application/json",
+            "x-access: private",
         ]);
+
+        if ($metaCode >= 400) {
+            throw new \RuntimeException("Meta upload failed ({$metaCode}): {$metaBody}");
+        }
 
         return $blobUrl;
     }
@@ -78,15 +95,16 @@ class FileModel
         $meta = $this->getMeta($uuid) ?? [];
         $meta = array_merge($meta, $changes);
 
-        $this->http->put(self::BLOB_API . "/meta_{$uuid}.json", [
-            'headers' => [
-                'Authorization'  => "Bearer {$this->token}",
-                'x-api-version'  => '7',
-                'x-content-type' => 'application/json',
-                'x-access'       => 'private',
-            ],
-            'body' => json_encode($meta),
+        [$body, $code] = $this->curlPut(self::BLOB_API . "/meta_{$uuid}.json", json_encode($meta), [
+            "Authorization: Bearer {$this->token}",
+            "Content-Type: application/json",
+            "x-content-type: application/json",
+            "x-access: private",
         ]);
+
+        if ($code >= 400) {
+            throw new \RuntimeException("Meta update failed ({$code}): {$body}");
+        }
     }
 
     public function downloadBytes(string $blobUrl): string
