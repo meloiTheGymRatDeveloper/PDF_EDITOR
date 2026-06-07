@@ -46,6 +46,9 @@ const Editor = (() => {
 
       document.getElementById('upload-zone').style.display = 'none';
       document.getElementById('btn-pay').disabled = false;
+      if (window.CURRENT_TOOL === 'protect') {
+        document.getElementById('btn-pay').disabled = true;
+      }
 
       if (window.CURRENT_TOOL === 'page-manager') {
         document.getElementById('page-manager-grid').style.display = 'block';
@@ -897,6 +900,201 @@ const SignTool = (() => {
   return { clearSig, placeSig, detectFields, getProcessedBytes };
 })();
 
+// ── Watermark Tool ──────────────────────────────────────────────
+const WatermarkTool = (() => {
+  let imgBytes = null;
+  let imgMime  = 'image/png';
+
+  document.getElementById('wm-img-input')?.addEventListener('change', async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    imgMime  = file.type;
+    imgBytes = await file.arrayBuffer();
+    e.target.value = '';
+    showToast('Image loaded');
+  });
+
+  function setMode(m) {
+    document.getElementById('wm-mode-text').classList.toggle('active', m === 'text');
+    document.getElementById('wm-mode-image').classList.toggle('active', m === 'image');
+    document.getElementById('wm-text-options').style.display = m === 'text'  ? '' : 'none';
+    document.getElementById('wm-img-options').style.display  = m === 'image' ? '' : 'none';
+  }
+
+  function toggleRangeInput() {
+    const val = document.getElementById('wm-apply-to').value;
+    document.getElementById('wm-range').style.display = val === 'range' ? '' : 'none';
+  }
+
+  function getTargetIndices(totalPages) {
+    const val = document.getElementById('wm-apply-to').value;
+    if (val === 'all')     return Array.from({ length: totalPages }, (_, i) => i);
+    if (val === 'current') return [Editor.getState().pageNum - 1];
+    const raw = document.getElementById('wm-range').value;
+    const idxs = [];
+    raw.split(',').forEach(part => {
+      const m = part.trim().match(/^(\d+)(?:-(\d+))?$/);
+      if (!m) return;
+      const s = Math.max(1, parseInt(m[1], 10));
+      const e = Math.min(totalPages, parseInt(m[2] ?? m[1], 10));
+      for (let i = s; i <= e; i++) idxs.push(i - 1);
+    });
+    return idxs.length ? idxs : Array.from({ length: totalPages }, (_, i) => i);
+  }
+
+  function hexToRgb(hex) {
+    const h = hex.replace('#', '');
+    return [
+      parseInt(h.slice(0, 2), 16) / 255,
+      parseInt(h.slice(2, 4), 16) / 255,
+      parseInt(h.slice(4, 6), 16) / 255,
+    ];
+  }
+
+  async function getProcessedBytes() {
+    const { pdfLibDoc, totalPages } = Editor.getState();
+    const isText   = document.getElementById('wm-mode-text').classList.contains('active');
+    const opacity  = parseInt(document.getElementById('wm-opacity').value, 10) / 100;
+    const rotation = parseFloat(document.getElementById('wm-rotation').value) || -45;
+    const targets  = getTargetIndices(totalPages);
+
+    if (isText) {
+      const text = document.getElementById('wm-text').value.trim();
+      if (!text) throw new Error('Enter watermark text first');
+      const size = parseInt(document.getElementById('wm-text-size').value, 10) || 48;
+      const [r, g, b] = hexToRgb(document.getElementById('wm-text-color').value);
+      const font = await pdfLibDoc.embedFont(PDFLib.StandardFonts.HelveticaBold);
+      for (const idx of targets) {
+        const page = pdfLibDoc.getPage(idx);
+        const { width, height } = page.getSize();
+        const textWidth = font.widthOfTextAtSize(text, size);
+        page.drawText(text, {
+          x:      width  / 2 - textWidth / 2,
+          y:      height / 2 - size / 2,
+          size,
+          font,
+          color:  PDFLib.rgb(r, g, b),
+          opacity,
+          rotate: PDFLib.degrees(rotation),
+        });
+      }
+    } else {
+      if (!imgBytes) throw new Error('Select a watermark image first');
+      const isPng = imgMime === 'image/png';
+      const img   = isPng
+        ? await pdfLibDoc.embedPng(imgBytes)
+        : await pdfLibDoc.embedJpg(imgBytes);
+      const size = parseInt(document.getElementById('wm-img-size').value, 10) || 200;
+      for (const idx of targets) {
+        const page = pdfLibDoc.getPage(idx);
+        const { width, height } = page.getSize();
+        page.drawImage(img, {
+          x:       width  / 2 - size / 2,
+          y:       height / 2 - size / 2,
+          width:   size,
+          height:  size,
+          opacity,
+        });
+      }
+    }
+
+    return await pdfLibDoc.save();
+  }
+
+  return { setMode, toggleRangeInput, getProcessedBytes };
+})();
+
+// ── Header & Footer Tool ────────────────────────────────────────
+const HeaderFooterTool = (() => {
+  function getZone(id) {
+    return document.getElementById(`hf-${id}`)?.value.trim() || '';
+  }
+
+  function resolveTokens(text, pageNum, totalPages, startAt) {
+    return text
+      .replace(/\{page\}/g,  String(pageNum - 1 + startAt))
+      .replace(/\{total\}/g, String(totalPages));
+  }
+
+  async function getProcessedBytes() {
+    const { pdfLibDoc, totalPages } = Editor.getState();
+    const fontSize = parseInt(document.getElementById('hf-font-size').value, 10) || 10;
+    const startAt  = parseInt(document.getElementById('hf-start-at').value,  10) || 1;
+    const font     = await pdfLibDoc.embedFont(PDFLib.StandardFonts.Helvetica);
+    const margin   = 15;
+    const black    = PDFLib.rgb(0, 0, 0);
+
+    for (let n = 1; n <= totalPages; n++) {
+      const page = pdfLibDoc.getPage(n - 1);
+      const { width, height } = page.getSize();
+
+      const zones = [
+        { id: 'header-left',   baseX: margin,         y: height - margin - fontSize, align: 'left'   },
+        { id: 'header-center', baseX: width / 2,      y: height - margin - fontSize, align: 'center' },
+        { id: 'header-right',  baseX: width - margin, y: height - margin - fontSize, align: 'right'  },
+        { id: 'footer-left',   baseX: margin,         y: margin,                     align: 'left'   },
+        { id: 'footer-center', baseX: width / 2,      y: margin,                     align: 'center' },
+        { id: 'footer-right',  baseX: width - margin, y: margin,                     align: 'right'  },
+      ];
+
+      for (const z of zones) {
+        const raw = getZone(z.id);
+        if (!raw) continue;
+        const text      = resolveTokens(raw, n, totalPages, startAt);
+        const textWidth = font.widthOfTextAtSize(text, fontSize);
+        let x = z.baseX;
+        if (z.align === 'center') x -= textWidth / 2;
+        if (z.align === 'right')  x -= textWidth;
+        page.drawText(text, { x, y: z.y, size: fontSize, font, color: black });
+      }
+    }
+
+    return await pdfLibDoc.save();
+  }
+
+  return { getProcessedBytes };
+})();
+
+// ── Protect PDF Tool ────────────────────────────────────────────
+const ProtectTool = (() => {
+  function validate() {
+    const pw  = document.getElementById('pt-password')?.value || '';
+    const pw2 = document.getElementById('pt-confirm')?.value  || '';
+    const err = document.getElementById('pt-error');
+    if (!err) return true;
+    if (pw.length < 4) {
+      err.textContent = 'Password must be at least 4 characters';
+      return false;
+    }
+    if (pw !== pw2) {
+      err.textContent = 'Passwords do not match';
+      return false;
+    }
+    err.textContent = '';
+    return true;
+  }
+
+  function onInput() {
+    document.getElementById('btn-pay').disabled = !validate();
+  }
+  document.getElementById('pt-password')?.addEventListener('input', onInput);
+  document.getElementById('pt-confirm')?.addEventListener('input', onInput);
+
+  async function getProcessedBytes() {
+    if (!validate()) throw new Error('Fix password errors before downloading');
+    const { pdfLibDoc } = Editor.getState();
+    const userPassword  = document.getElementById('pt-password').value;
+    const ownerPassword = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    const permissions   = {};
+    if (document.getElementById('pt-allow-print').checked) permissions.printing  = 'highResolution';
+    if (document.getElementById('pt-allow-copy').checked)  permissions.copying   = true;
+    if (document.getElementById('pt-allow-edit').checked)  permissions.modifying = true;
+    return await pdfLibDoc.save({ userPassword, ownerPassword, permissions });
+  }
+
+  return { validate, getProcessedBytes };
+})();
+
 // ── Payment Initiation ──────────────────────────────────────────
 async function initiatePayment() {
   const btn = document.getElementById('btn-pay');
@@ -906,14 +1104,17 @@ async function initiatePayment() {
   try {
     const tool = window.CURRENT_TOOL;
     const toolMap = {
-      annotate:        AnnotateTool,
-      merge:           MergeTool,
-      split:           SplitTool,
-      compress:        CompressTool,
-      convert:         ConvertTool,
-      sign:            SignTool,
-      'add-text':      AddTextTool,
-      'page-manager':  PageManagerTool,
+      annotate:         AnnotateTool,
+      merge:            MergeTool,
+      split:            SplitTool,
+      compress:         CompressTool,
+      convert:          ConvertTool,
+      sign:             SignTool,
+      'add-text':       AddTextTool,
+      'page-manager':   PageManagerTool,
+      'watermark':      WatermarkTool,
+      'header-footer':  HeaderFooterTool,
+      'protect':        ProtectTool,
     };
 
     const bytes    = await toolMap[tool].getProcessedBytes();
