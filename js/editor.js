@@ -138,10 +138,19 @@ const AnnotateTool = (() => {
   function setMode(m) {
     mode = m;
     document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
-    const map = { text: 'btn-text', highlight: 'btn-highlight', draw: 'btn-draw', rect: 'btn-rect', image: 'btn-image' };
+    const map = {
+      text:          'btn-text',
+      highlight:     'btn-highlight',
+      draw:          'btn-draw',
+      rect:          'btn-rect',
+      image:         'btn-image',
+      underline:     'btn-underline',
+      strikethrough: 'btn-strikethrough',
+      sticky:        'btn-sticky',
+    };
     document.getElementById(map[m])?.classList.add('active');
     const overlay = document.getElementById('overlay-canvas');
-    overlay.style.cursor = (m === 'text' || m === 'image') ? 'crosshair' : 'crosshair';
+    overlay.style.cursor = 'crosshair';
   }
 
   function onPageRender(n) {
@@ -171,6 +180,15 @@ const AnnotateTool = (() => {
         pendingImgPlacement = { x: startX, y: startY };
         imgInput.click();
       }
+      if (mode === 'sticky') {
+        drawing = false;
+        const text = prompt('Sticky note text:');
+        if (!text) return;
+        const action = { type: 'sticky', x: startX, y: startY, text };
+        (history[n] = history[n] || []).push(action);
+        drawAction(canvas.getContext('2d'), action);
+        return;
+      }
       if (mode === 'draw') tempPath = [{ x: startX, y: startY }];
     };
     canvas.onmousemove = e => {
@@ -190,7 +208,7 @@ const AnnotateTool = (() => {
         ctx.lineTo(cx, cy);
         ctx.stroke();
       }
-      if (mode === 'highlight' || mode === 'rect') {
+      if (mode === 'highlight' || mode === 'rect' || mode === 'underline' || mode === 'strikethrough') {
         const actions = (history[n] || []);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         actions.forEach(a => drawAction(ctx, a));
@@ -205,7 +223,7 @@ const AnnotateTool = (() => {
       const cy = e.clientY - r.top;
       if (mode === 'draw') {
         (history[n] = history[n] || []).push({ type: 'draw', path: [...tempPath] });
-      } else if (mode === 'highlight' || mode === 'rect') {
+      } else if (mode === 'highlight' || mode === 'rect' || mode === 'underline' || mode === 'strikethrough') {
         (history[n] = history[n] || []).push({ type: mode, x: startX, y: startY, w: cx - startX, h: cy - startY });
       }
       onPageRender(n);
@@ -252,6 +270,30 @@ const AnnotateTool = (() => {
       const img = new Image(); img.src = a.src;
       img.onload = () => ctx.drawImage(img, a.x, a.y, a.w, a.h);
       if (img.complete) ctx.drawImage(img, a.x, a.y, a.w, a.h);
+    } else if (a.type === 'underline') {
+      ctx.strokeStyle = '#0000ff';
+      ctx.lineWidth   = 2;
+      ctx.beginPath();
+      ctx.moveTo(a.x,           a.y + Math.abs(a.h));
+      ctx.lineTo(a.x + a.w,     a.y + Math.abs(a.h));
+      ctx.stroke();
+    } else if (a.type === 'strikethrough') {
+      ctx.strokeStyle = '#ff0000';
+      ctx.lineWidth   = 2;
+      ctx.beginPath();
+      ctx.moveTo(a.x,           a.y + Math.abs(a.h) / 2);
+      ctx.lineTo(a.x + a.w,     a.y + Math.abs(a.h) / 2);
+      ctx.stroke();
+    } else if (a.type === 'sticky') {
+      ctx.fillStyle = 'rgba(255,230,0,0.88)';
+      ctx.fillRect(a.x, a.y, 120, 60);
+      ctx.strokeStyle = '#c8a400';
+      ctx.lineWidth   = 1;
+      ctx.strokeRect(a.x, a.y, 120, 60);
+      ctx.fillStyle = '#333';
+      ctx.font      = '11px sans-serif';
+      a.text.split('\n').slice(0, 3).forEach((l, i) =>
+        ctx.fillText(l.slice(0, 20), a.x + 4, a.y + 16 + i * 14));
     }
   }
 
@@ -312,6 +354,41 @@ const AnnotateTool = (() => {
           page.drawImage(emb, {
             x: a.x * scaleX, y: height - (a.y + a.h) * scaleY,
             width: a.w * scaleX, height: a.h * scaleY,
+          });
+        } else if (a.type === 'underline') {
+          page.drawLine({
+            start:     { x: a.x * scaleX,         y: height - (a.y + Math.abs(a.h)) * scaleY },
+            end:       { x: (a.x + a.w) * scaleX,  y: height - (a.y + Math.abs(a.h)) * scaleY },
+            thickness: 2,
+            color:     PDFLib.rgb(0, 0, 1),
+          });
+        } else if (a.type === 'strikethrough') {
+          page.drawLine({
+            start:     { x: a.x * scaleX,         y: height - (a.y + Math.abs(a.h) / 2) * scaleY },
+            end:       { x: (a.x + a.w) * scaleX,  y: height - (a.y + Math.abs(a.h) / 2) * scaleY },
+            thickness: 2,
+            color:     PDFLib.rgb(1, 0, 0),
+          });
+        } else if (a.type === 'sticky') {
+          const noteH = 60 * scaleY;
+          const noteW = 120 * scaleX;
+          page.drawRectangle({
+            x:       a.x * scaleX,
+            y:       height - (a.y + 60) * scaleY,
+            width:   noteW,
+            height:  noteH,
+            color:   PDFLib.rgb(1, 0.9, 0),
+            opacity: 0.88,
+          });
+          const noteFont = await pdfLibDoc.embedFont(PDFLib.StandardFonts.Helvetica);
+          a.text.split('\n').slice(0, 3).forEach((l, i) => {
+            page.drawText(l.slice(0, 20), {
+              x:     a.x * scaleX + 4 * scaleX,
+              y:     height - (a.y + 16 + i * 14) * scaleY,
+              size:  8,
+              font:  noteFont,
+              color: PDFLib.rgb(0.2, 0.2, 0.2),
+            });
           });
         }
       }
