@@ -42,7 +42,7 @@ class PaymentModel
                             'name'     => 'PDF Download',
                             'quantity' => 1,
                         ]],
-                        'payment_method_types' => ['card', 'gcash', 'maya', 'qrph'],
+                        'payment_method_types' => ['card', 'gcash', 'paymaya', 'qrph'],
                     ],
                 ],
             ],
