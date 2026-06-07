@@ -29,7 +29,7 @@ try {
     $event = json_decode($rawBody, true);
     $type  = $event['data']['attributes']['type'] ?? '';
 
-    $paidTypes = ['payment.paid', 'link.payment.paid'];
+    $paidTypes = ['payment.paid', 'link.payment.paid', 'checkout_session.payment.paid'];
     if (!in_array($type, $paidTypes, true)) {
         http_response_code(200);
         echo json_encode(['status' => 'ignored', 'type' => $type]);

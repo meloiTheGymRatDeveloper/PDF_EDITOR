@@ -24,7 +24,7 @@ class PaymentModel
 
     public function createLink(string $uuid, string $successUrl, string $failUrl): string
     {
-        $res = $this->http->post(self::API . '/links', [
+        $res = $this->http->post(self::API . '/checkout_sessions', [
             'headers' => [
                 'Authorization' => 'Basic ' . base64_encode($this->secretKey . ':'),
                 'Content-Type'  => 'application/json',
@@ -32,13 +32,17 @@ class PaymentModel
             'json' => [
                 'data' => [
                     'attributes' => [
-                        'amount'           => 5000,
-                        'description'      => 'PDF_EDITOR download',
-                        'reference_number' => $uuid,
-                        'redirect'         => [
-                            'success' => $successUrl,
-                            'failed'  => $failUrl,
-                        ],
+                        'cancel_url'           => $failUrl,
+                        'success_url'          => $successUrl,
+                        'description'          => 'PDF_EDITOR download',
+                        'reference_number'     => $uuid,
+                        'line_items'           => [[
+                            'currency' => 'PHP',
+                            'amount'   => 5000,
+                            'name'     => 'PDF Download',
+                            'quantity' => 1,
+                        ]],
+                        'payment_method_types' => ['card', 'gcash', 'maya', 'qrph'],
                     ],
                 ],
             ],
