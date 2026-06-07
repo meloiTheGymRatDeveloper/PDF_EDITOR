@@ -408,7 +408,10 @@ const AddTextTool = (() => {
     ].join(';');
     document.body.appendChild(input);
     input.focus();
+    let committed = false;
     const commit = () => {
+      if (committed) return;
+      committed = true;
       input.remove();
       if (!input.value.trim()) return;
       (boxes[n] = boxes[n] || []).push({ x: cx, y: cy, text: input.value.trim(), ...getSettings() });
@@ -417,7 +420,7 @@ const AddTextTool = (() => {
     input.onblur = commit;
     input.onkeydown = ev => {
       if (ev.key === 'Enter')  commit();
-      if (ev.key === 'Escape') input.remove();
+      if (ev.key === 'Escape') { committed = true; input.remove(); }
     };
   }
 
@@ -443,9 +446,11 @@ const AddTextTool = (() => {
       const { width, height } = page.getSize();
       const sx = width  / pdfCanvas.width;
       const sy = height / pdfCanvas.height;
+      const fontCache = {};
       for (const b of list) {
         const fontName = getFontName(b.fontFamily, b.bold, b.italic);
-        const font = await pdfLibDoc.embedFont(fontName);
+        if (!fontCache[fontName]) fontCache[fontName] = await pdfLibDoc.embedFont(fontName);
+        const font = fontCache[fontName];
         const hex = b.color.replace('#', '');
         const r  = parseInt(hex.slice(0, 2), 16) / 255;
         const g  = parseInt(hex.slice(2, 4), 16) / 255;
