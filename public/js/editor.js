@@ -552,7 +552,13 @@ async function initiatePayment() {
       throw new Error(data.error ?? 'Failed to create payment');
     }
 
-    window.location.href = data.checkout_url;
+    window.open(data.checkout_url, '_blank');
+
+    btn.textContent = '✓ Payment Opened';
+    const downloadUrl = '/payment/success?token=' + data.token;
+    const status = document.getElementById('cta-status');
+    status.innerHTML =
+      'After completing payment, <a href="' + downloadUrl + '" style="color:#fbbf24;font-weight:600;">click here to download your file</a>.';
   } catch (err) {
     showToast('Error: ' + err.message);
     btn.disabled = false;
