@@ -45,7 +45,6 @@ class FileModel
             "Authorization: Bearer {$this->token}",
             "Content-Type: {$mimeType}",
             "x-content-type: {$mimeType}",
-            "x-access: private",
         ]);
 
         if ($code >= 400) {
@@ -67,7 +66,6 @@ class FileModel
             "Authorization: Bearer {$this->token}",
             "Content-Type: application/json",
             "x-content-type: application/json",
-            "x-access: private",
         ]);
 
         if ($metaCode >= 400) {
@@ -99,7 +97,6 @@ class FileModel
             "Authorization: Bearer {$this->token}",
             "Content-Type: application/json",
             "x-content-type: application/json",
-            "x-access: private",
         ]);
 
         if ($code >= 400) {
