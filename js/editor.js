@@ -319,6 +319,152 @@ const AnnotateTool = (() => {
   return { setMode, onPageRender, undo, clear, getProcessedBytes };
 })();
 
+// ── Add Text Tool ───────────────────────────────────────────────
+const AddTextTool = (() => {
+  let boxes = {}; // {pageNum: [{x,y,text,fontFamily,fontSize,bold,italic,color,_dw}]}
+
+  const FONT_MAP = {
+    Arial:   { n: PDFLib.StandardFonts.Helvetica,    b: PDFLib.StandardFonts.HelveticaBold,       i: PDFLib.StandardFonts.HelveticaOblique,    bi: PDFLib.StandardFonts.HelveticaBoldOblique },
+    Times:   { n: PDFLib.StandardFonts.TimesRoman,   b: PDFLib.StandardFonts.TimesBold,           i: PDFLib.StandardFonts.TimesItalic,         bi: PDFLib.StandardFonts.TimesBoldItalic },
+    Courier: { n: PDFLib.StandardFonts.Courier,      b: PDFLib.StandardFonts.CourierBold,         i: PDFLib.StandardFonts.CourierOblique,      bi: PDFLib.StandardFonts.CourierBoldOblique },
+  };
+
+  function getFontName(family, bold, italic) {
+    const v = FONT_MAP[family] || FONT_MAP.Arial;
+    return (bold && italic) ? v.bi : bold ? v.b : italic ? v.i : v.n;
+  }
+
+  function getSettings() {
+    return {
+      fontFamily: document.getElementById('at-font-family').value,
+      fontSize:   parseInt(document.getElementById('at-font-size').value, 10) || 14,
+      color:      document.getElementById('at-color').value,
+      bold:       document.getElementById('at-bold').classList.contains('active'),
+      italic:     document.getElementById('at-italic').classList.contains('active'),
+    };
+  }
+
+  function toggleStyle(btnId) {
+    document.getElementById(btnId).classList.toggle('active');
+  }
+
+  function onPageRender(n) {
+    const overlay = document.getElementById('overlay-canvas');
+    const ctx = overlay.getContext('2d');
+    ctx.clearRect(0, 0, overlay.width, overlay.height);
+    (boxes[n] || []).forEach(b => drawBox(ctx, b));
+    overlay.onclick = e => handleClick(e, overlay, n);
+  }
+
+  function drawBox(ctx, b) {
+    const style = `${b.italic ? 'italic ' : ''}${b.bold ? 'bold ' : ''}${b.fontSize}px sans-serif`;
+    ctx.font = style;
+    ctx.fillStyle = b.color;
+    ctx.fillText(b.text, b.x, b.y);
+    b._dw = ctx.measureText(b.text).width;
+    ctx.strokeStyle = 'rgba(100,100,255,0.35)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.strokeRect(b.x - 2, b.y - b.fontSize - 2, b._dw + 18, b.fontSize + 6);
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(255,80,80,0.85)';
+    ctx.fillRect(b.x + b._dw, b.y - b.fontSize - 2, 14, 14);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 10px sans-serif';
+    ctx.fillText('×', b.x + b._dw + 3, b.y - b.fontSize + 8);
+  }
+
+  function handleClick(e, canvas, n) {
+    const r  = canvas.getBoundingClientRect();
+    const cx = e.clientX - r.left;
+    const cy = e.clientY - r.top;
+    const list = boxes[n] || [];
+    for (let i = list.length - 1; i >= 0; i--) {
+      const b = list[i];
+      if (b._dw !== undefined &&
+          cx >= b.x + b._dw && cx <= b.x + b._dw + 14 &&
+          cy >= b.y - b.fontSize - 2 && cy <= b.y - b.fontSize + 12) {
+        list.splice(i, 1);
+        onPageRender(n);
+        return;
+      }
+    }
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.style.cssText = [
+      'position:fixed',
+      `left:${e.clientX}px`,
+      `top:${e.clientY}px`,
+      'z-index:9999',
+      'background:#fff',
+      'color:#000',
+      'border:2px solid #667eea',
+      'border-radius:4px',
+      'padding:3px 8px',
+      'font-size:14px',
+      'min-width:120px',
+      'outline:none',
+      'box-shadow:0 4px 12px rgba(0,0,0,0.3)',
+    ].join(';');
+    document.body.appendChild(input);
+    input.focus();
+    const commit = () => {
+      input.remove();
+      if (!input.value.trim()) return;
+      (boxes[n] = boxes[n] || []).push({ x: cx, y: cy, text: input.value.trim(), ...getSettings() });
+      onPageRender(n);
+    };
+    input.onblur = commit;
+    input.onkeydown = ev => {
+      if (ev.key === 'Enter')  commit();
+      if (ev.key === 'Escape') input.remove();
+    };
+  }
+
+  function undo() {
+    const { pageNum } = Editor.getState();
+    (boxes[pageNum] = boxes[pageNum] || []).pop();
+    onPageRender(pageNum);
+  }
+
+  function clearAll() {
+    const { pageNum } = Editor.getState();
+    boxes[pageNum] = [];
+    onPageRender(pageNum);
+  }
+
+  async function getProcessedBytes() {
+    const { pdfLibDoc, totalPages } = Editor.getState();
+    const pdfCanvas = document.getElementById('pdf-canvas');
+    for (let n = 1; n <= totalPages; n++) {
+      const list = boxes[n] || [];
+      if (!list.length) continue;
+      const page = pdfLibDoc.getPage(n - 1);
+      const { width, height } = page.getSize();
+      const sx = width  / pdfCanvas.width;
+      const sy = height / pdfCanvas.height;
+      for (const b of list) {
+        const fontName = getFontName(b.fontFamily, b.bold, b.italic);
+        const font = await pdfLibDoc.embedFont(fontName);
+        const hex = b.color.replace('#', '');
+        const r  = parseInt(hex.slice(0, 2), 16) / 255;
+        const g  = parseInt(hex.slice(2, 4), 16) / 255;
+        const bv = parseInt(hex.slice(4, 6), 16) / 255;
+        page.drawText(b.text, {
+          x:     b.x * sx,
+          y:     height - b.y * sy,
+          size:  b.fontSize,
+          font,
+          color: PDFLib.rgb(r, g, bv),
+        });
+      }
+    }
+    return await pdfLibDoc.save();
+  }
+
+  return { onPageRender, toggleStyle, undo, clearAll, getProcessedBytes };
+})();
+
 // ── Merge Tool ──────────────────────────────────────────────────
 const MergeTool = (() => {
   const files = [];
@@ -546,12 +692,13 @@ async function initiatePayment() {
   try {
     const tool = window.CURRENT_TOOL;
     const toolMap = {
-      annotate: AnnotateTool,
-      merge:    MergeTool,
-      split:    SplitTool,
-      compress: CompressTool,
-      convert:  ConvertTool,
-      sign:     SignTool,
+      annotate:       AnnotateTool,
+      merge:          MergeTool,
+      split:          SplitTool,
+      compress:       CompressTool,
+      convert:        ConvertTool,
+      sign:           SignTool,
+      'add-text':     AddTextTool,
     };
 
     const bytes    = await toolMap[tool].getProcessedBytes();
