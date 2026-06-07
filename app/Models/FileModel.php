@@ -29,7 +29,7 @@ class FileModel
         $res = $this->http->put(self::BLOB_API . '/' . $filename, [
             'headers' => [
                 'Authorization'    => "Bearer {$this->token}",
-                'Content-Type'     => $mimeType,
+                'x-api-version'    => '7',
                 'x-content-type'   => $mimeType,
                 'x-access'         => 'private',
             ],
@@ -50,7 +50,7 @@ class FileModel
         $this->http->put(self::BLOB_API . "/meta_{$uuid}.json", [
             'headers' => [
                 'Authorization'  => "Bearer {$this->token}",
-                'Content-Type'   => 'application/json',
+                'x-api-version'  => '7',
                 'x-content-type' => 'application/json',
                 'x-access'       => 'private',
             ],
@@ -81,7 +81,7 @@ class FileModel
         $this->http->put(self::BLOB_API . "/meta_{$uuid}.json", [
             'headers' => [
                 'Authorization'  => "Bearer {$this->token}",
-                'Content-Type'   => 'application/json',
+                'x-api-version'  => '7',
                 'x-content-type' => 'application/json',
                 'x-access'       => 'private',
             ],
