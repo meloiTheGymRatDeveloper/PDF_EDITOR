@@ -1075,7 +1075,8 @@ const ProtectTool = (() => {
   }
 
   function onInput() {
-    document.getElementById('btn-pay').disabled = !validate();
+    const { pdfLibDoc } = Editor.getState();
+    document.getElementById('btn-pay').disabled = !pdfLibDoc || !validate();
   }
   document.getElementById('pt-password')?.addEventListener('input', onInput);
   document.getElementById('pt-confirm')?.addEventListener('input', onInput);
@@ -1084,7 +1085,7 @@ const ProtectTool = (() => {
     if (!validate()) throw new Error('Fix password errors before downloading');
     const { pdfLibDoc } = Editor.getState();
     const userPassword  = document.getElementById('pt-password').value;
-    const ownerPassword = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    const ownerPassword = Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b => b.toString(16).padStart(2, '0')).join('');
     const permissions   = {};
     if (document.getElementById('pt-allow-print').checked) permissions.printing  = 'highResolution';
     if (document.getElementById('pt-allow-copy').checked)  permissions.copying   = true;
