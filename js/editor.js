@@ -474,8 +474,9 @@ const AddTextTool = (() => {
 const PageManagerTool = (() => {
   let pages      = [];
   let extraDocs  = [];
-  let cropBoxes  = {};
+  let cropBoxes   = {};
   let selectedIdx = null;
+  let sortableInst = null;
 
   async function onFileLoad() {
     const { totalPages } = Editor.getState();
@@ -486,7 +487,6 @@ const PageManagerTool = (() => {
     cropBoxes  = {};
     selectedIdx = null;
     await renderGrid();
-    initSortable();
   }
 
   async function renderGrid() {
@@ -561,22 +561,23 @@ const PageManagerTool = (() => {
     addBtn.innerHTML = '<div class="pm-add__icon">+</div><div class="pm-add__label">Blank page</div>';
     addBtn.onclick = () => addBlankPage();
     grid.appendChild(addBtn);
+    initSortable();
   }
 
   function initSortable() {
     const grid = document.getElementById('page-manager-grid');
-    if (window.Sortable) {
-      Sortable.create(grid, {
-        animation: 150,
-        filter: '.pm-add',
-        onEnd: evt => {
-          if (evt.oldIndex === evt.newIndex) return;
-          const moved = pages.splice(evt.oldIndex, 1)[0];
-          pages.splice(evt.newIndex, 0, moved);
-          renderGrid();
-        },
-      });
-    }
+    if (!window.Sortable) return;
+    if (sortableInst) { sortableInst.destroy(); sortableInst = null; }
+    sortableInst = Sortable.create(grid, {
+      animation: 150,
+      filter: '.pm-add',
+      onEnd: evt => {
+        if (evt.oldIndex === evt.newIndex) return;
+        const moved = pages.splice(evt.oldIndex, 1)[0];
+        pages.splice(evt.newIndex, 0, moved);
+        renderGrid();
+      },
+    });
   }
 
   function rotatePage(i) {
