@@ -31,6 +31,7 @@ class FileModel
                 'Authorization'    => "Bearer {$this->token}",
                 'Content-Type'     => $mimeType,
                 'x-content-type'   => $mimeType,
+                'x-access'         => 'private',
             ],
             'body' => $bytes,
         ]);
@@ -51,6 +52,7 @@ class FileModel
                 'Authorization'  => "Bearer {$this->token}",
                 'Content-Type'   => 'application/json',
                 'x-content-type' => 'application/json',
+                'x-access'       => 'private',
             ],
             'body' => json_encode($meta),
         ]);
@@ -81,9 +83,18 @@ class FileModel
                 'Authorization'  => "Bearer {$this->token}",
                 'Content-Type'   => 'application/json',
                 'x-content-type' => 'application/json',
+                'x-access'       => 'private',
             ],
             'body' => json_encode($meta),
         ]);
+    }
+
+    public function downloadBytes(string $blobUrl): string
+    {
+        $res = $this->http->get($blobUrl, [
+            'headers' => ['Authorization' => "Bearer {$this->token}"],
+        ]);
+        return (string) $res->getBody();
     }
 
     public function delete(string $uuid): void

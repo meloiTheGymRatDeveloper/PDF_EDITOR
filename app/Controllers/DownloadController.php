@@ -45,6 +45,14 @@ class DownloadController extends Controller
             $this->abort(403);
         }
 
-        $this->redirect($meta['blob_url']);
+        $ext      = $meta['ext'] ?? 'pdf';
+        $mime     = $meta['mime'] ?? 'application/pdf';
+        $bytes    = $this->fileModel->downloadBytes($meta['blob_url']);
+
+        header('Content-Type: ' . $mime);
+        header('Content-Disposition: attachment; filename="output.' . $ext . '"');
+        header('Content-Length: ' . strlen($bytes));
+        echo $bytes;
+        exit;
     }
 }
