@@ -69,7 +69,13 @@ class Router
             $controller->$method_name(...array_values($match['params']));
         } catch (\Throwable $e) {
             http_response_code(500);
-            echo '<h1>500 — Internal Server Error</h1>';
+            $isApi = str_starts_with(strtok($uri, '?'), '/payment/') || str_starts_with(strtok($uri, '?'), '/download');
+            if ($isApi) {
+                header('Content-Type: application/json');
+                echo json_encode(['error' => $e->getMessage()]);
+            } else {
+                echo '<h1>500 — Internal Server Error</h1>';
+            }
         }
     }
 }

@@ -10,6 +10,8 @@ class PaymentController extends Controller
 {
     public function prepare(): void
     {
+        header('Content-Type: application/json');
+
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
             $this->json(['error' => 'Method not allowed'], 405);
             return;
@@ -20,22 +22,26 @@ class PaymentController extends Controller
             return;
         }
 
-        $upload  = $_FILES['file'];
-        $mime    = $_POST['mime'] ?? 'application/pdf';
-        $bytes   = file_get_contents($upload['tmp_name']);
-        $uuid    = Uuid::uuid4()->toString();
+        try {
+            $upload  = $_FILES['file'];
+            $mime    = $_POST['mime'] ?? 'application/pdf';
+            $bytes   = file_get_contents($upload['tmp_name']);
+            $uuid    = Uuid::uuid4()->toString();
 
-        $fileModel    = FileModel::fromEnv();
-        $paymentModel = PaymentModel::fromEnv();
+            $fileModel    = FileModel::fromEnv();
+            $paymentModel = PaymentModel::fromEnv();
 
-        $appUrl     = rtrim($_ENV['APP_URL'], '/');
-        $successUrl = "{$appUrl}/payment/success?token={$uuid}";
-        $failUrl    = "{$appUrl}/payment/failed?token={$uuid}";
+            $appUrl     = rtrim($_ENV['APP_URL'] ?? '', '/');
+            $successUrl = "{$appUrl}/payment/success?token={$uuid}";
+            $failUrl    = "{$appUrl}/payment/failed?token={$uuid}";
 
-        $fileModel->upload($uuid, $bytes, $mime);
-        $checkoutUrl = $paymentModel->createLink($uuid, $successUrl, $failUrl);
+            $fileModel->upload($uuid, $bytes, $mime);
+            $checkoutUrl = $paymentModel->createLink($uuid, $successUrl, $failUrl);
 
-        $this->json(['checkout_url' => $checkoutUrl, 'token' => $uuid]);
+            $this->json(['checkout_url' => $checkoutUrl, 'token' => $uuid]);
+        } catch (\Throwable $e) {
+            $this->json(['error' => $e->getMessage()], 500);
+        }
     }
 
     public function success(): void
