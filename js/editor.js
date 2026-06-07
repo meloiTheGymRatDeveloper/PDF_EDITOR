@@ -31,14 +31,29 @@ const Editor = (() => {
     try {
       rawBytes = await file.arrayBuffer();
       const uint8 = new Uint8Array(rawBytes);
-      pdfjsDoc  = await pdfjsLib.getDocument({ data: uint8.slice() }).promise;
-      pdfLibDoc = await PDFLib.PDFDocument.load(uint8);
+      pdfjsDoc = await pdfjsLib.getDocument({ data: uint8.slice() }).promise;
+      try {
+        pdfLibDoc = await PDFLib.PDFDocument.load(uint8);
+      } catch (_encErr) {
+        showToast('This PDF is password-protected. Remove the password first.');
+        rawBytes = null;
+        pdfjsDoc = null;
+        pdfLibDoc = null;
+        return;
+      }
       totalPages = pdfjsDoc.numPages;
-      pageNum = 1;
+      pageNum    = 1;
 
       document.getElementById('upload-zone').style.display = 'none';
-      document.getElementById('pdf-container').style.display = 'block';
       document.getElementById('btn-pay').disabled = false;
+
+      if (window.CURRENT_TOOL === 'page-manager') {
+        document.getElementById('page-manager-grid').style.display = 'block';
+        await PageManagerTool.onFileLoad();
+        return;
+      }
+
+      document.getElementById('pdf-container').style.display = 'block';
 
       if (window.CURRENT_TOOL === 'compress') {
         document.getElementById('compress-info').textContent =
@@ -68,6 +83,8 @@ const Editor = (() => {
 
     if (window.CURRENT_TOOL === 'annotate') {
       AnnotateTool.onPageRender(n);
+    } else if (window.CURRENT_TOOL === 'add-text') {
+      AddTextTool.onPageRender(n);
     }
   }
 
