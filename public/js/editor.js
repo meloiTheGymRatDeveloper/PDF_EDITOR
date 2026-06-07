@@ -31,7 +31,7 @@ const Editor = (() => {
     try {
       rawBytes = await file.arrayBuffer();
       const uint8 = new Uint8Array(rawBytes);
-      pdfjsDoc  = await pdfjsLib.getDocument({ data: uint8 }).promise;
+      pdfjsDoc  = await pdfjsLib.getDocument({ data: uint8.slice() }).promise;
       pdfLibDoc = await PDFLib.PDFDocument.load(uint8);
       totalPages = pdfjsDoc.numPages;
       pageNum = 1;
